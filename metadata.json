@@ -1,0 +1,6 @@
+{
+  "name": "NextMobile - Flagship Store",
+  "description": "Comércio mobile premium de smartphones flagship e dispositivos conectados de última geração. Experiência de compra fluida com condições exclusivas Pix e entrega expressa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

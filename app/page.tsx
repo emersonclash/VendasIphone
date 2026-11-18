@@ -1,418 +1,414 @@
 'use client';
 
 import React from 'react';
-import { PRODUCTS, Product, formatBRL } from '@/data/products';
-import { Navbar } from '@/components/Navbar';
-import { HeroSpotlight } from '@/components/HeroSpotlight';
-import { ProductCard } from '@/components/ProductCard';
-import { ProductDetailModal } from '@/components/ProductDetailModal';
-import { CartDrawer, CartItem } from '@/components/CartDrawer';
-import { CheckoutModal } from '@/components/CheckoutModal';
-import { DeviceComparatorModal } from '@/components/DeviceComparatorModal';
-import { NextTradeModal } from '@/components/NextTradeModal';
-import { Footer } from '@/components/Footer';
-import { Filter, SlidersHorizontal, ArrowUpDown, ShoppingBag, Check } from 'lucide-react';
+import { Bot, Calculator, ClipboardPaste, Copy, Check, Download, Sparkles, TriangleAlert, Trash2 } from 'lucide-react';
+import { itemKey, parseSupplierList, type ParsedItem } from '@/lib/pricing/parser';
+import {
+  analyze,
+  DEFAULT_CONFIG,
+  formatBRL,
+  formatShareList,
+  matchCompetitor,
+  summarize,
+  toCSV,
+  type CompetitorPrice,
+  type PricingConfig,
+} from '@/lib/pricing/engine';
+import { SAMPLE_COMPETITOR_LIST, SAMPLE_SUPPLIER_LIST } from '@/lib/pricing/sample';
+import { ConfigPanel } from '@/components/analyzer/ConfigPanel';
+import { ResultsTable } from '@/components/analyzer/ResultsTable';
 
-export default function HomePage() {
-  // Navigation & Filter States
-  const [activeCategory, setActiveCategory] = React.useState<string>('all');
-  const [selectedBrand, setSelectedBrand] = React.useState<string>('all');
-  const [searchQuery, setSearchQuery] = React.useState<string>('');
-  const [sortBy, setSortBy] = React.useState<'popular' | 'price_asc' | 'price_desc' | 'discount'>('popular');
+const STORAGE_KEY = 'analisador-preco:v1';
 
-  // Modals & Drawers States
-  const [cartOpen, setCartOpen] = React.useState<boolean>(false);
-  const [checkoutOpen, setCheckoutOpen] = React.useState<boolean>(false);
-  const [compareOpen, setCompareOpen] = React.useState<boolean>(false);
-  const [tradeInOpen, setTradeInOpen] = React.useState<boolean>(false);
+type Saved = {
+  supplierText: string;
+  competitorText: string;
+  config: PricingConfig;
+  approx: boolean;
+  manualCompetitor: Record<string, number>;
+  overrides: Record<string, number>;
+  sectionNames: Record<string, string>;
+  header: string;
+  footer: string;
+};
 
-  // Selected Product for PDP
-  const [pdpProduct, setPdpProduct] = React.useState<Product | null>(null);
-  const [pdpInitialCapacity, setPdpInitialCapacity] = React.useState<string | undefined>(undefined);
-  const [pdpInitialColor, setPdpInitialColor] = React.useState<string | undefined>(undefined);
-
-  // Cart & Compare Data
-  const [cartItems, setCartItems] = React.useState<CartItem[]>([
-    {
-      id: 'samsung-galaxy-s25-ultra-256GB-titanium-black',
-      product: PRODUCTS[0],
-      capacity: '256GB',
-      color: 'titanium-black',
-      quantity: 1,
-    },
-  ]);
-  const [compareList, setCompareList] = React.useState<Product[]>([PRODUCTS[0], PRODUCTS[1]]);
-  const [appliedCoupon, setAppliedCoupon] = React.useState<string | null>(null);
-
-  // Toast feedback
-  const [toastMessage, setToastMessage] = React.useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
-
-  // Cart Handlers
-  const handleAddToCart = (product: Product, capacity: string, color: string) => {
-    const finalCapacity = capacity || product.capacities?.[0]?.size || '';
-    const finalColor = color || product.colors[0]?.id || '';
-    const itemId = `${product.id}-${finalCapacity}-${finalColor}`;
-
-    setCartItems((prev) => {
-      const existing = prev.find((item) => item.id === itemId);
-      if (existing) {
-        return prev.map((item) =>
-          item.id === itemId ? { ...item, quantity: item.quantity + 1 } : item
-        );
-      }
-      return [
-        ...prev,
-        {
-          id: itemId,
-          product,
-          capacity: finalCapacity,
-          color: finalColor,
-          quantity: 1,
-        },
-      ];
-    });
-
-    showToast(`"${product.name}" adicionado à sacola!`);
-  };
-
-  const handleInstantBuy = (product: Product, capacity: string, color: string) => {
-    handleAddToCart(product, capacity, color);
-    setPdpProduct(null);
-    setCheckoutOpen(true);
-  };
-
-  const handleUpdateQuantity = (id: string, delta: number) => {
-    setCartItems((prev) =>
-      prev
-        .map((item) => {
-          if (item.id === id) {
-            const newQty = item.quantity + delta;
-            return newQty > 0 ? { ...item, quantity: newQty } : null;
-          }
-          return item;
-        })
-        .filter(Boolean) as CartItem[]
-    );
-  };
-
-  const handleRemoveItem = (id: string) => {
-    setCartItems((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  // Compare Handlers
-  const handleToggleCompare = (product: Product) => {
-    setCompareList((prev) => {
-      const exists = prev.some((p) => p.id === product.id);
-      if (exists) {
-        showToast(`Removido do comparador`);
-        return prev.filter((p) => p.id !== product.id);
-      }
-      if (prev.length >= 3) {
-        showToast('Máximo de 3 aparelhos para comparação.');
-        return prev;
-      }
-      showToast(`Adicionado ao comparador (${prev.length + 1}/3)`);
-      return [...prev, product];
-    });
-  };
-
-  const handleRemoveFromCompare = (productId: string) => {
-    setCompareList((prev) => prev.filter((p) => p.id !== productId));
-  };
-
-  // Coupon Handlers
-  const handleApplyCoupon = (code: string) => {
-    if (code === 'NEXT10' || code === 'FLAGSHIP') {
-      setAppliedCoupon(code);
-      showToast(`Cupom ${code} aplicado com sucesso!`);
-      return true;
-    }
-    return false;
-  };
-
-  const handleRemoveCoupon = () => {
-    setAppliedCoupon(null);
-    showToast('Cupom removido.');
-  };
-
-  const handleApplyTradeInDiscount = (amount: number) => {
-    setAppliedCoupon('FLAGSHIP');
-    showToast(`Voucher de ${formatBRL(amount)} aplicado via NextTrade!`);
-  };
-
-  // Open PDP
-  const handleOpenDetails = (product: Product, capacity?: string, color?: string) => {
-    setPdpProduct(product);
-    setPdpInitialCapacity(capacity);
-    setPdpInitialColor(color);
-  };
-
-  // Filter & Search Logic
-  const filteredProducts = PRODUCTS.filter((product) => {
-    // Category filter
-    if (activeCategory !== 'all') {
-      if (activeCategory === 'smartphones' && product.category !== 'smartphones') return false;
-      if (activeCategory === 'foldables' && product.category !== 'foldables') return false;
-      if (activeCategory === 'accessories' && product.category !== 'accessories') return false;
-    }
-
-    // Brand filter
-    if (selectedBrand !== 'all' && product.brand.toLowerCase() !== selectedBrand.toLowerCase()) {
-      return false;
-    }
-
-    // Search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = product.name.toLowerCase().includes(q);
-      const matchBrand = product.brand.toLowerCase().includes(q);
-      const matchTagline = product.tagline.toLowerCase().includes(q);
-      const matchSpecs = product.specs.processor.toLowerCase().includes(q);
-      if (!matchName && !matchBrand && !matchTagline && !matchSpecs) {
-        return false;
-      }
-    }
-
-    return true;
-  }).sort((a, b) => {
-    if (sortBy === 'price_asc') return a.basePrice - b.basePrice;
-    if (sortBy === 'price_desc') return b.basePrice - a.basePrice;
-    if (sortBy === 'discount') return b.pixDiscountPercent - a.pixDiscountPercent;
-    return b.reviewCount - a.reviewCount; // popular
+/** IDs estáveis (seção + modelo + cor + versão) para que preços digitados sobrevivam a uma nova colagem. */
+function withStableIds(items: ParsedItem[]): ParsedItem[] {
+  const seen = new Map<string, number>();
+  return items.map((i) => {
+    const base = `${i.section}|${itemKey(i, i.variant)}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return { ...i, id: n > 1 ? `${base}#${n}` : base };
   });
+}
 
-  const cartTotalCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
+const textarea =
+  'min-h-56 w-full resize-y rounded-xl border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100';
+const btn =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60';
+const btnPrimary = `${btn} bg-blue-700 text-white hover:bg-blue-800`;
+const btnGhost = `${btn} border border-slate-300 bg-white text-slate-800 hover:border-slate-500`;
+
+export default function AnalisadorPage() {
+  const [supplierText, setSupplierText] = React.useState('');
+  const [competitorText, setCompetitorText] = React.useState('');
+  const [config, setConfig] = React.useState<PricingConfig>(DEFAULT_CONFIG);
+  const [approx, setApprox] = React.useState(true);
+  const [manualCompetitor, setManualCompetitor] = React.useState<Record<string, number>>({});
+  const [overrides, setOverrides] = React.useState<Record<string, number>>({});
+  const [sectionNames, setSectionNames] = React.useState<Record<string, string>>({});
+  const [header, setHeader] = React.useState('');
+  const [footer, setFooter] = React.useState('Valores à vista no Pix · Consulte parcelamento');
+  const [aiItems, setAiItems] = React.useState<ParsedItem[] | null>(null);
+  const [aiBusy, setAiBusy] = React.useState<'interpretar' | 'analisar' | null>(null);
+  const [aiError, setAiError] = React.useState<string | null>(null);
+  const [analysis, setAnalysis] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const [loaded, setLoaded] = React.useState(false);
+
+  // Carrega e salva o trabalho no navegador
+  React.useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw) as Partial<Saved>;
+        if (s.supplierText !== undefined) setSupplierText(s.supplierText);
+        if (s.competitorText !== undefined) setCompetitorText(s.competitorText);
+        if (s.config) setConfig({ ...DEFAULT_CONFIG, ...s.config });
+        if (s.approx !== undefined) setApprox(s.approx);
+        if (s.manualCompetitor) setManualCompetitor(s.manualCompetitor);
+        if (s.overrides) setOverrides(s.overrides);
+        if (s.sectionNames) setSectionNames(s.sectionNames);
+        if (s.header !== undefined) setHeader(s.header);
+        if (s.footer !== undefined) setFooter(s.footer);
+      }
+    } catch {
+      /* armazenamento indisponível: segue sem salvar */
+    }
+    setLoaded(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!loaded) return;
+    const s: Saved = { supplierText, competitorText, config, approx, manualCompetitor, overrides, sectionNames, header, footer };
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    } catch {
+      /* ignora */
+    }
+  }, [loaded, supplierText, competitorText, config, approx, manualCompetitor, overrides, sectionNames, header, footer]);
+
+  // Cálculo
+  const local = React.useMemo(() => parseSupplierList(supplierText), [supplierText]);
+  const items = React.useMemo(() => withStableIds(aiItems ?? local.items), [aiItems, local.items]);
+  const competitorItems = React.useMemo(() => parseSupplierList(competitorText).items, [competitorText]);
+
+  const competitor = React.useMemo(() => {
+    const auto = matchCompetitor(items, competitorItems, approx);
+    const merged: Record<string, CompetitorPrice> = { ...auto };
+    for (const [id, price] of Object.entries(manualCompetitor)) merged[id] = { price, exact: true };
+    return merged;
+  }, [items, competitorItems, approx, manualCompetitor]);
+
+  // Preço digitado à mão vale só enquanto o custo do fornecedor for o mesmo.
+  const overrideKey = (i: Pick<ParsedItem, 'id' | 'cost'>) => `${i.id}@${i.cost}`;
+  const activeOverrides = React.useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const i of items) {
+      const v = overrides[overrideKey(i)];
+      if (v !== undefined) out[i.id] = v;
+    }
+    return out;
+  }, [items, overrides]);
+
+  const rows = React.useMemo(() => analyze(items, config, competitor, activeOverrides), [items, config, competitor, activeOverrides]);
+  const summary = React.useMemo(() => summarize(rows), [rows]);
+  const displayRows = React.useMemo(
+    () => rows.map((r) => ({ ...r, section: sectionNames[r.section]?.trim() || r.section })),
+    [rows, sectionNames],
+  );
+  const shareText = React.useMemo(() => formatShareList(displayRows, { header, footer }), [displayRows, header, footer]);
+
+  // Ações
+  const setMap = (setter: React.Dispatch<React.SetStateAction<Record<string, number>>>) => (id: string, v: number | null) =>
+    setter((m) => {
+      const next = { ...m };
+      if (v === null) delete next[id];
+      else next[id] = v;
+      return next;
+    });
+
+  async function callAgent<T>(payload: object): Promise<T> {
+    const res = await fetch('/api/agente', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'O agente não respondeu.');
+    return data as T;
+  }
+
+  async function interpretarComIA() {
+    setAiBusy('interpretar');
+    setAiError(null);
+    try {
+      const { items: found } = await callAgent<{ items: ParsedItem[] }>({ action: 'interpretar', text: supplierText });
+      if (!found.length) throw new Error('O agente não encontrou aparelhos com preço nessa lista.');
+      setAiItems(found);
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function pedirAnalise() {
+    setAiBusy('analisar');
+    setAiError(null);
+    setAnalysis(null);
+    try {
+      const compact = displayRows.map((r) => ({
+        secao: r.section, modelo: r.model, armazenamento: r.storage, versao: r.variant, cor: r.color,
+        custo: r.cost, preco: r.price, lucro: r.profit, margem: Number(r.marginPct.toFixed(1)),
+        concorrente: r.competitor?.price ?? null, situacao: r.status,
+      }));
+      const { analysis: text } = await callAgent<{ analysis: string }>({
+        action: 'analisar',
+        rows: compact,
+        config: { margemPadrao: config.markupPct, lucroMinimo: config.minProfit, estrategia: config.competitorMode, abaixoDoConcorrente: config.undercut, regras: config.rules },
+      });
+      setAnalysis(text);
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(shareText);
+    } catch {
+      const el = document.getElementById('share-text') as HTMLTextAreaElement | null;
+      el?.select();
+      document.execCommand('copy');
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function baixarCSV() {
+    const blob = new Blob(['﻿' + toCSV(displayRows)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `precos-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function limpar() {
+    setSupplierText('');
+    setCompetitorText('');
+    setManualCompetitor({});
+    setOverrides({});
+    setSectionNames({});
+    setAiItems(null);
+    setAnalysis(null);
+  }
+
+  const hasItems = rows.length > 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
-      
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-20 right-4 sm:right-6 z-50 bg-[#0F172A] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top duration-200">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
+    <div className="min-h-screen bg-[#f5f7fa]">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white">
+            <Calculator className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div className="mr-auto">
+            <h1 className="text-lg font-bold text-slate-900">Analisador de Preço · iPhone</h1>
+            <p className="text-sm text-slate-600">Cole a lista do fornecedor, compare com o concorrente e gere a lista de venda.</p>
+          </div>
+          <button type="button" className={btnGhost} onClick={limpar}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" /> Limpar tudo
+          </button>
         </div>
-      )}
+      </header>
 
-      {/* Top Bar Navigation */}
-      <Navbar
-        cartCount={cartTotalCount}
-        onOpenCart={() => setCartOpen(true)}
-        compareList={compareList}
-        onOpenCompare={() => setCompareOpen(true)}
-        onOpenTradeIn={() => setTradeInOpen(true)}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        activeCategory={activeCategory}
-        onSelectCategory={setActiveCategory}
-      />
-
-      {/* Hero Campaign Spotlight */}
-      <HeroSpotlight
-        featuredProduct={PRODUCTS[0]} // Samsung Galaxy S25 Ultra
-        onSelectFeatured={(p) => handleOpenDetails(p)}
-        onExploreCatalog={() => {
-          const el = document.getElementById('catalog-section');
-          el?.scrollIntoView({ behavior: 'smooth' });
-        }}
-        onOpenTradeIn={() => setTradeInOpen(true)}
-      />
-
-      {/* Catalog & Filter Section */}
-      <main id="catalog-section" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        
-        {/* Section Headline */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 pb-4 border-b border-slate-200">
-          <div>
-            <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
-              Vitrine Oficial
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] tracking-tight">
-              Modelos em Destaque
+      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="flex min-w-0 flex-col gap-6">
+          {/* 1. Listas */}
+          <section aria-labelledby="in-title" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 id="in-title" className="mb-4 flex items-center gap-2 text-base font-bold text-slate-900">
+              <ClipboardPaste className="h-4 w-4 text-blue-700" aria-hidden="true" /> Listas
             </h2>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              {filteredProducts.length}{' '}
-              {filteredProducts.length === 1 ? 'dispositivo disponível' : 'dispositivos disponíveis'}{' '}
-              com envio imediato e 15% OFF no Pix.
-            </p>
-          </div>
-
-          {/* Interactive Sorting Dropdown */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">Ordenar por:</span>
-            <div className="relative">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#2563EB] cursor-pointer"
-              >
-                <option value="popular">Mais Populares</option>
-                <option value="price_asc">Menor Preço</option>
-                <option value="price_desc">Maior Preço</option>
-                <option value="discount">Maior Desconto Pix</option>
-              </select>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label htmlFor="supplier" className="text-sm font-semibold text-slate-800">Lista do fornecedor</label>
+                  <button type="button" className="text-sm font-semibold text-blue-700 underline-offset-2 hover:underline"
+                    onClick={() => { setSupplierText(SAMPLE_SUPPLIER_LIST); setCompetitorText(SAMPLE_COMPETITOR_LIST); setAiItems(null); }}>
+                    Usar exemplo
+                  </button>
+                </div>
+                <textarea id="supplier" className={textarea} value={supplierText} spellCheck={false}
+                  placeholder={'📱 13 | 128GB\n⚫ Preto 💰 1.750\n⚪ Branco 💰 1.800'}
+                  onChange={(e) => { setSupplierText(e.target.value); setAiItems(null); }} />
+                <p className="mt-2 text-xs text-slate-600" aria-live="polite">
+                  {aiItems
+                    ? `${aiItems.length} aparelhos lidos pelo agente de IA.`
+                    : supplierText.trim()
+                      ? `${local.items.length} aparelhos lidos${local.unparsed.length ? ` · ${local.unparsed.length} linhas não entendidas` : ''}.`
+                      : 'Cole a lista como veio do WhatsApp — emojis e R$ podem ficar.'}
+                </p>
+              </div>
+              <div>
+                <label htmlFor="competitor" className="mb-1 block text-sm font-semibold text-slate-800">
+                  Lista do concorrente <span className="font-normal text-slate-600">(opcional)</span>
+                </label>
+                <textarea id="competitor" className={textarea} value={competitorText} spellCheck={false}
+                  placeholder={'📱 18 Pro Max | 256GB\n🔵 Azul 💰 10.300'}
+                  onChange={(e) => setCompetitorText(e.target.value)} />
+                <p className="mt-2 text-xs text-slate-600">
+                  {competitorItems.length
+                    ? `${competitorItems.length} preços do concorrente · ${summary.withCompetitor} aparelhos seus com referência.`
+                    : 'Também dá para digitar o preço do concorrente direto na tabela.'}
+                </p>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Brand Segmented Controls & Category Filter */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
-          {/* Brand Buttons */}
-          <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl overflow-x-auto max-w-full">
-            {[
-              { id: 'all', label: 'Todas as Marcas' },
-              { id: 'Apple', label: 'Apple' },
-              { id: 'Samsung', label: 'Samsung' },
-              { id: 'Google', label: 'Google Pixel' },
-              { id: 'NextMobile', label: 'Acessórios NextMobile' },
-            ].map((b) => (
-              <button
-                key={b.id}
-                onClick={() => setSelectedBrand(b.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
-                  selectedBrand === b.id
-                    ? 'bg-white text-[#0F172A] shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {b.label}
-              </button>
-            ))}
-          </div>
+            {!aiItems && local.unparsed.length > 0 && (
+              <details className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <summary className="cursor-pointer font-semibold">
+                  {local.unparsed.length} linhas não foram entendidas
+                </summary>
+                <ul className="mt-2 list-disc pl-5 font-mono text-xs">
+                  {local.unparsed.slice(0, 30).map((l, i) => <li key={i}>{l}</li>)}
+                </ul>
+                <p className="mt-2">Se faltar aparelho, use “Interpretar com IA”.</p>
+              </details>
+            )}
 
-          {/* Active Search indicator */}
-          {searchQuery && (
-            <div className="text-xs text-slate-600 flex items-center gap-1.5">
-              <span>Resultados para: <strong>&ldquo;{searchQuery}&rdquo;</strong></span>
-              <button
-                onClick={() => setSearchQuery('')}
-                className="text-blue-600 hover:underline font-semibold text-xs ml-1 cursor-pointer"
-              >
-                Limpar
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" className={btnGhost} disabled={!supplierText.trim() || aiBusy !== null} onClick={interpretarComIA}>
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+                {aiBusy === 'interpretar' ? 'Lendo a lista…' : 'Interpretar com IA'}
               </button>
+              {aiItems && (
+                <button type="button" className={btnGhost} onClick={() => setAiItems(null)}>Voltar à leitura automática</button>
+              )}
             </div>
+            {aiError && (
+              <p role="alert" className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {aiError}
+              </p>
+            )}
+          </section>
+
+          {/* 2. Resumo */}
+          {hasItems && (
+            <section aria-label="Resumo" className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: 'Aparelhos', value: String(summary.count) },
+                { label: 'Margem média', value: `${summary.avgMarginPct.toFixed(1).replace('.', ',')}%` },
+                { label: 'Lucro (1 de cada)', value: formatBRL(summary.totalProfit) },
+                {
+                  label: 'Abaixo do concorrente',
+                  value: summary.withCompetitor ? `${summary.beating} de ${summary.withCompetitor}` : '—',
+                  hint: summary.inviable ? `${summary.inviable} não dá para bater` : undefined,
+                },
+              ].map((c) => (
+                <div key={c.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-600">{c.label}</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{c.value}</p>
+                  {c.hint && <p className="mt-1 text-xs font-semibold text-red-700">{c.hint}</p>}
+                </div>
+              ))}
+            </section>
+          )}
+
+          {/* 3. Tabela */}
+          {hasItems && (
+            <ResultsTable
+              rows={rows}
+              sectionNames={sectionNames}
+              onRenameSection={(orig, name) => setSectionNames((m) => ({ ...m, [orig]: name }))}
+              onCompetitorPrice={setMap(setManualCompetitor)}
+              onOverride={(id, v) => {
+                const item = items.find((i) => i.id === id);
+                if (item) setMap(setOverrides)(overrideKey(item), v);
+              }}
+              manualCompetitor={manualCompetitor}
+            />
+          )}
+
+          {/* 4. Agente */}
+          {hasItems && (
+            <section aria-labelledby="ag-title" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 id="ag-title" className="mr-auto flex items-center gap-2 text-base font-bold text-slate-900">
+                  <Bot className="h-4 w-4 text-blue-700" aria-hidden="true" /> Análise do agente
+                </h2>
+                <button type="button" className={btnPrimary} disabled={aiBusy !== null} onClick={pedirAnalise}>
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  {aiBusy === 'analisar' ? 'Analisando…' : 'Pedir análise'}
+                </button>
+              </div>
+              <div aria-live="polite">
+                {analysis ? (
+                  <div className="mt-4 whitespace-pre-line rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-800">{analysis}</div>
+                ) : (
+                  <p className="mt-3 text-sm text-slate-600">
+                    O agente lê a tabela e aponta margens baixas, onde dá para subir o preço e onde não compensa bater o concorrente.
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* 5. Lista de venda */}
+          {hasItems && (
+            <section aria-labelledby="sh-title" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <h2 id="sh-title" className="mr-auto text-base font-bold text-slate-900">Lista para divulgar</h2>
+                <button type="button" className={btnGhost} onClick={baixarCSV}>
+                  <Download className="h-4 w-4" aria-hidden="true" /> Planilha (CSV)
+                </button>
+                <button type="button" className={btnPrimary} onClick={copiar}>
+                  {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+                  {copied ? 'Copiado' : 'Copiar lista'}
+                </button>
+              </div>
+              <div className="mb-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <label htmlFor="sh-header" className="mb-1 block text-xs font-semibold text-slate-600">Texto do topo</label>
+                  <input id="sh-header" value={header} onChange={(e) => setHeader(e.target.value)} placeholder="Ex.: LISTA DE HOJE · Pronta entrega"
+                    className="min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100" />
+                </div>
+                <div>
+                  <label htmlFor="sh-footer" className="mb-1 block text-xs font-semibold text-slate-600">Texto do rodapé</label>
+                  <input id="sh-footer" value={footer} onChange={(e) => setFooter(e.target.value)}
+                    className="min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100" />
+                </div>
+              </div>
+              <label htmlFor="share-text" className="sr-only">Lista pronta</label>
+              <textarea id="share-text" readOnly value={shareText} className={`${textarea} min-h-96`} />
+            </section>
           )}
         </div>
 
-        {/* Product Grid: 3 columns desktop, 2 columns tablet, 1 column mobile */}
-        {filteredProducts.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
-            <h3 className="text-base font-bold text-slate-800">
-              Nenhum produto encontrado
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Não encontramos nenhum smartphone correspondente ao filtro aplicado. Tente buscar por outros termos ou marcas.
-            </p>
-            <button
-              onClick={() => {
-                setActiveCategory('all');
-                setSelectedBrand('all');
-                setSearchQuery('');
-              }}
-              className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-            >
-              Restaurar Filtros
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-            {filteredProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onOpenDetails={handleOpenDetails}
-                onAddToCart={handleAddToCart}
-                isCompared={compareList.some((p) => p.id === product.id)}
-                onToggleCompare={handleToggleCompare}
-              />
-            ))}
-          </div>
-        )}
-
+        <aside className="flex flex-col gap-6">
+          <ConfigPanel config={config} onChange={setConfig} approxMatch={approx} onApproxChange={setApprox} />
+          <p className="px-1 text-xs leading-relaxed text-slate-600">
+            Os preços são calculados aqui mesmo, sem IA: margem sobre o custo, regra do modelo, arredondamento e lucro
+            mínimo. O agente só lê listas difíceis e comenta a tabela. Margens abaixo de ~10% costumam sumir no cartão
+            parcelado.
+          </p>
+        </aside>
       </main>
-
-      {/* Floating Cart Reminder Bar on Mobile (when cart has items) */}
-      {cartItems.length > 0 && !cartOpen && !checkoutOpen && (
-        <div className="sm:hidden fixed bottom-4 left-4 right-4 z-30 animate-in slide-in-from-bottom duration-300">
-          <button
-            onClick={() => setCartOpen(true)}
-            className="w-full h-12 bg-[#0F172A] hover:bg-slate-800 text-white rounded-2xl shadow-xl px-4 flex items-center justify-between border border-slate-700"
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-[#2563EB] text-white text-xs font-bold flex items-center justify-center">
-                {cartTotalCount}
-              </div>
-              <span className="text-xs font-semibold">Ver Sacola</span>
-            </div>
-            <span className="text-xs font-bold text-emerald-400">
-              15% OFF no Pix ativo →
-            </span>
-          </button>
-        </div>
-      )}
-
-      {/* PDP Modal */}
-      <ProductDetailModal
-        product={pdpProduct}
-        initialCapacity={pdpInitialCapacity}
-        initialColor={pdpInitialColor}
-        isOpen={Boolean(pdpProduct)}
-        onClose={() => setPdpProduct(null)}
-        onAddToCart={handleAddToCart}
-        onInstantBuy={handleInstantBuy}
-        onToggleCompare={handleToggleCompare}
-        isCompared={Boolean(pdpProduct && compareList.some((p) => p.id === pdpProduct.id))}
-      />
-
-      {/* Cart Slide-over Drawer */}
-      <CartDrawer
-        isOpen={cartOpen}
-        onClose={() => setCartOpen(false)}
-        items={cartItems}
-        onUpdateQuantity={handleUpdateQuantity}
-        onRemoveItem={handleRemoveItem}
-        onProceedToCheckout={() => {
-          setCartOpen(false);
-          setCheckoutOpen(true);
-        }}
-        appliedCoupon={appliedCoupon}
-        onApplyCoupon={handleApplyCoupon}
-        onRemoveCoupon={handleRemoveCoupon}
-      />
-
-      {/* Checkout Modal */}
-      <CheckoutModal
-        isOpen={checkoutOpen}
-        onClose={() => setCheckoutOpen(false)}
-        items={cartItems}
-        appliedCoupon={appliedCoupon}
-        onClearCart={() => setCartItems([])}
-      />
-
-      {/* Device Comparator Modal */}
-      <DeviceComparatorModal
-        isOpen={compareOpen}
-        onClose={() => setCompareOpen(false)}
-        compareList={compareList}
-        onRemoveFromCompare={handleRemoveFromCompare}
-        onSelectProduct={handleOpenDetails}
-      />
-
-      {/* NextTrade Modal */}
-      <NextTradeModal
-        isOpen={tradeInOpen}
-        onClose={() => setTradeInOpen(false)}
-        onApplyTradeInDiscount={handleApplyTradeInDiscount}
-      />
-
-      {/* Quiet Footer */}
-      <Footer />
-
     </div>
   );
 }

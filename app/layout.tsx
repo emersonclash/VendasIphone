@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const viewport: Viewport = {
-  themeColor: '#004ac6',
+  themeColor: '#1d4ed8',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -17,18 +17,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'NextMobile | Flagship Experience',
-  description: 'Comércio mobile premium de smartphones flagship e dispositivos conectados de última geração. Condições exclusivas Pix e entrega expressa.',
-  openGraph: {
-    title: 'NextMobile | Flagship Experience',
-    description: 'Comércio mobile premium de smartphones flagship e dispositivos conectados de última geração.',
-    type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'NextMobile | Flagship Experience',
-    description: 'Comércio mobile premium de smartphones flagship e dispositivos conectados de última geração.',
-  },
+  title: 'Analisador de Preço · iPhone',
+  description: 'Cole a lista do fornecedor, aplique sua margem, compare com o concorrente e gere a lista de venda pronta para o WhatsApp.',
 };
 
 export default function RootLayout({
@@ -38,7 +28,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" className={`${inter.variable} scroll-smooth`}>
-      <body className="bg-[#f7f9fb] text-[#191c1e] font-sans antialiased min-h-screen selection:bg-blue-100 selection:text-blue-900" suppressHydrationWarning>
+      <body className="bg-[#f5f7fa] text-slate-900 font-sans antialiased min-h-screen selection:bg-blue-100 selection:text-blue-900" suppressHydrationWarning>
         {children}
       </body>
     </html>

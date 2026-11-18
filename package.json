@@ -1,5 +1,5 @@
 {
-  "name": "ai-studio-applet",
+  "name": "analisador-preco-iphone",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "clean": "next clean"
+    "clean": "next clean",
+    "test": "node --experimental-strip-types --no-warnings lib/pricing/pricing.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
